@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+.DS_Store
+# full Kaggle competition files are too large for GitHub
+data/train.csv
+data/test.csv
+data/sample_submission.csv

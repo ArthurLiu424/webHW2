@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>洪水機率多元回歸</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;800&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: hydrology field-report — sticky CRISP-DM phase rail on the left, long-form analysis on the right */
+:root {
+  --paper: #f4f7f8;
+  --sheet: #ffffff;
+  --ink: #13242e;
+  --muted: #586a74;
+  --rule: #d4dee2;
+  --water: #1d6a95;
+  --water-soft: rgba(29,106,149,.16);
+  --water-mid: rgba(29,106,149,.45);
+  --silt: #b8702b;
+  --ok: #2f7d4f;
+  --warn: #b0611d;
+  --gpt: #6a4fa3;
+  --nlm: #2a7f86;
+  --f-display: "Noto Serif TC", "Songti TC", Georgia, serif;
+  --f-body: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0d161c; --sheet: #121e26; --ink: #e3ecf0; --muted: #94a6af; --rule: #24343e;
+    --water: #63b4e2; --water-soft: rgba(99,180,226,.16); --water-mid: rgba(99,180,226,.42);
+    --silt: #e2a25f; --ok: #6cc28f; --warn: #e5a061; --gpt: #a78be0; --nlm: #6cc6cc;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0d161c; --sheet: #121e26; --ink: #e3ecf0; --muted: #94a6af; --rule: #24343e;
+  --water: #63b4e2; --water-soft: rgba(99,180,226,.16); --water-mid: rgba(99,180,226,.42);
+  --silt: #e2a25f; --ok: #6cc28f; --warn: #e5a061; --gpt: #a78be0; --nlm: #6cc6cc;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.75 var(--f-body); }
+a { color: var(--water); }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.3; margin: 0; }
+h2 { font-size: 1.6rem; }
+h3 { font-size: 1.1rem; margin-top: .5rem; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--f-data); font-size: .88em; }
+:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* header */
+header.top { border-bottom: 1px solid var(--rule); background: var(--sheet); }
+header.top .wrap { padding-block: 40px 28px; display: grid; gap: 18px; }
+.eyebrow { font: 600 .75rem/1 var(--f-data); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+header h1 { font-size: clamp(1.8rem, 4.5vw, 2.8rem); font-weight: 800; }
+header .lede { color: var(--muted); font-size: 1.02rem; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; border-top: 1px solid var(--rule); margin-top: 6px; }
+.kpi { padding: 14px 16px 4px 0; display: grid; gap: 2px; }
+.kpi b { font: 600 1.6rem/1.1 var(--f-data); font-variant-numeric: tabular-nums; }
+.kpi span { color: var(--muted); font-size: .82rem; }
+
+/* body grid */
+.layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 40px; padding-block: 32px 80px; }
+nav.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; display: grid; gap: 2px; }
+nav.rail a { display: grid; grid-template-columns: 26px 1fr; align-items: baseline; padding: 6px 8px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: .9rem; }
+nav.rail a:hover { background: var(--water-soft); color: var(--ink); }
+nav.rail a i { font: 600 .75rem var(--f-data); font-style: normal; color: var(--water); }
+nav.rail .sep { height: 1px; background: var(--rule); margin: 8px 0; }
+main { display: grid; gap: 56px; min-width: 0; }
+section { display: grid; gap: 16px; min-width: 0; scroll-margin-top: 20px; }
+.phase { font: 600 .78rem var(--f-data); color: var(--water); letter-spacing: .08em; }
+.figure { background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 14px 6px; min-width: 0; }
+.figure figcaption { color: var(--muted); font-size: .84rem; padding: 4px 4px 8px; }
+.plot { width: 100%; height: 360px; }
+.plot.tall { height: 440px; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.note { border-left: 3px solid var(--silt); padding: 4px 0 4px 14px; color: var(--ink); }
+ul.clean { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; max-width: 70ch; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+th, td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 600; color: var(--muted); font-size: .78rem; letter-spacing: .04em; }
+td { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+td:first-child { font-family: var(--f-body); }
+tr.pick td { background: var(--water-soft); }
+.pill { display: inline-block; padding: 1px 9px; border-radius: 99px; font: 600 .74rem var(--f-data); }
+.pill.ok { color: var(--ok); border: 1px solid var(--ok); }
+.pill.warn { color: var(--warn); border: 1px solid var(--warn); }
+
+/* predictor */
+.predictor { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; }
+.sliders { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; }
+.sl { display: grid; grid-template-columns: 1fr 28px; align-items: center; gap: 0 8px; font-size: .8rem; }
+.sl label { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl output { font: 600 .82rem var(--f-data); text-align: right; }
+.sl input { grid-column: 1 / -1; width: 100%; accent-color: var(--water); margin: 0; }
+.readout { display: grid; align-content: start; gap: 14px; position: sticky; top: 20px; }
+.big { font: 600 3rem/1 var(--f-data); color: var(--water); font-variant-numeric: tabular-nums; }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font: 500 .85rem var(--f-body); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--water); }
+.bar { position: relative; height: 44px; border-bottom: 1px solid var(--rule); }
+.bar .pi, .bar .ci, .bar .pt { position: absolute; top: 10px; height: 24px; }
+.bar .pi { background: var(--water-soft); border-radius: 4px; }
+.bar .ci { background: var(--water-mid); }
+.bar .pt { width: 2px; background: var(--water); top: 4px; height: 36px; }
+.scale { display: flex; justify-content: space-between; font: .72rem var(--f-data); color: var(--muted); }
+dl.iv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: .86rem; }
+dl.iv dt { color: var(--muted); }
+dl.iv dd { margin: 0; font-family: var(--f-data); }
+
+/* AI-labelled blocks */
+.ai { border: 1px solid var(--rule); border-radius: 10px; background: var(--sheet); padding: 18px 20px; display: grid; gap: 10px; }
+.ai .tag { justify-self: start; font: 600 .75rem var(--f-data); letter-spacing: .08em; padding: 3px 10px; border-radius: 4px; color: var(--sheet); }
+.ai.gpt .tag { background: var(--gpt); }
+.ai.nlm .tag { background: var(--nlm); }
+.ai.gpt { border-left: 4px solid var(--gpt); }
+.ai.nlm { border-left: 4px solid var(--nlm); }
+footer { border-top: 1px solid var(--rule); color: var(--muted); font-size: .82rem; }
+footer .wrap { padding-block: 24px; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  nav.rail { position: static; display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  nav.rail a { grid-template-columns: auto auto; gap: 4px; white-space: nowrap; border: 1px solid var(--rule); }
+  nav.rail .sep { display: none; }
+  .two, .predictor { grid-template-columns: minmax(0, 1fr); }
+  .readout { position: static; }
+}
+@media (max-width: 480px) { .sliders { grid-template-columns: minmax(0, 1fr); } .plot { height: 300px; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">DIC HW2 · Multiple Linear Regression · CRISP-DM</div>
+    <h1>用 20 個風險因子預測洪水機率</h1>
+    <p class="lede">資料集：Kaggle <a href="https://www.kaggle.com/datasets/naiyakhalid/flood-prediction-dataset" target="_blank" rel="noopener">Flood Prediction Dataset</a>（train.csv 即 <a href="https://www.kaggle.com/competitions/playground-series-s4e5" target="_blank" rel="noopener">Playground S4E5</a> 資料，隨機抽樣 50,000 筆）。目標變數 <code>FloodProbability</code>，模型為 OLS 多元線性回歸，含特徵選擇、模型評估與 95% 信賴區間／預測區間。</p>
+    <div class="kpis" id="kpis"></div>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <nav class="rail" aria-label="章節">
+    <a href="#business"><i>1</i>Business</a>
+    <a href="#data"><i>2</i>Data Understanding</a>
+    <a href="#prep"><i>3</i>Data Preparation</a>
+    <a href="#model"><i>4</i>Modeling</a>
+    <a href="#eval"><i>5</i>Evaluation</a>
+    <a href="#deploy"><i>6</i>Deployment</a>
+    <div class="sep"></div>
+    <a href="#gpt"><i>G</i>GPT 輔助內容</a>
+    <a href="#nlm"><i>N</i>NotebookLM 摘要</a>
+  </nav>
+
+  <main>
+    <!-- 1 -->
+    <section id="business">
+      <div class="phase">PHASE 1 · BUSINESS UNDERSTANDING</div>
+      <h2>問題定義</h2>
+      <p>洪水是造成財產與人命損失最頻繁的天然災害之一。地方政府與保險公司需要一個<strong>可解釋</strong>的工具：給定一個區域在季風強度、排水系統、都市化、森林砍伐等 20 項因子的評分（0–18 分整數），估計該區發生洪水的機率，並且清楚說明估計的不確定程度。</p>
+      <ul class="clean">
+        <li><b>預測目標：</b>FloodProbability（連續值，約 0.32–0.73）。</li>
+        <li><b>成功指標：</b>測試集 R² ≥ 0.80、RMSE 越低越好；95% 預測區間實際覆蓋率接近 95%。</li>
+        <li><b>為何用線性回歸：</b>係數可直接解讀為「某因子每增加 1 分，洪水機率增加多少」，便於決策者溝通。</li>
+      </ul>
+    </section>
+
+    <!-- 2 -->
+    <section id="data">
+      <div class="phase">PHASE 2 · DATA UNDERSTANDING</div>
+      <h2>資料理解</h2>
+      <div class="tablebox"><table id="t-dataset"></table></div>
+      <p class="note" id="orig-note"></p>
+      <div class="two">
+        <figure class="figure"><div class="plot" id="c-hist"></div><figcaption>目標變數分布：近似常態、略右偏。</figcaption></figure>
+        <figure class="figure"><div class="plot" id="c-corr"></div><figcaption>各特徵與目標的 Pearson 相關係數，全部為正且大小接近（約 0.17–0.20）。</figcaption></figure>
+      </div>
+      <figure class="figure"><div class="plot tall" id="c-heat"></div><figcaption>相關係數矩陣。特徵之間幾乎互相獨立（|r| 最大值見上表），因此不必擔心多重共線性。</figcaption></figure>
+    </section>
+
+    <!-- 3 -->
+    <section id="prep">
+      <div class="phase">PHASE 3 · DATA PREPARATION</div>
+      <h2>資料準備</h2>
+      <ul class="clean">
+        <li>移除 <code>id</code> 欄位；檢查缺失值與重複列（皆為 0，無需填補）。</li>
+        <li>所有特徵皆為整數評分，不需要類別編碼。</li>
+        <li>以固定亂數種子（seed=42）切分 <b>80% 訓練 / 20% 測試</b>；特徵選擇與交叉驗證<b>只使用訓練集</b>，避免資料洩漏。</li>
+        <li>標準化（z-score）只用訓練集的平均與標準差，供 Lasso 與標準化係數比較使用；最終模型以原始尺度訓練，係數易於解釋。</li>
+        <li>另建工程特徵 <code>FeatureSum</code>＝20 個因子總和，作為簡單線性回歸對照組。</li>
+      </ul>
+    </section>
+
+    <!-- 4 -->
+    <section id="model">
+      <div class="phase">PHASE 4 · MODELING &amp; FEATURE SELECTION</div>
+      <h2>特徵選擇與建模</h2>
+      <p>使用四種特徵選擇方法互相驗證：(a) Filter：單變量 F-test（等同 <code>SelectKBest(f_regression)</code>）；(b) Wrapper：前向逐步選擇，以 5-fold CV RMSE 為準則；(c) Embedded：Lasso 路徑；(d) 後向淘汰（p-value &gt; 0.05 即刪除）。</p>
+      <div class="two">
+        <figure class="figure"><div class="plot" id="c-forward"></div><figcaption>前向選擇：每加入一個特徵，CV RMSE 都穩定下降、Adjusted R² 穩定上升，直到 20 個全部納入才達最佳。</figcaption></figure>
+        <figure class="figure"><div class="plot" id="c-lasso"></div><figcaption>Lasso 係數路徑（標準化尺度）：λ 減小時 20 個係數幾乎同時進入模型，且大小相近。</figcaption></figure>
+      </div>
+      <div class="tablebox"><table id="t-fs"></table></div>
+      <p class="note" id="fs-note"></p>
+      <h3>模型比較（測試集）</h3>
+      <div class="tablebox"><table id="t-models"></table></div>
+      <figure class="figure"><div class="plot" id="c-models"></div><figcaption>不同特徵數下的測試集 R²。單一原始特徵只有約 0.04；用全部 20 個特徵，或只用一個 FeatureSum，都可達約 0.847。</figcaption></figure>
+    </section>
+
+    <!-- 5 -->
+    <section id="eval">
+      <div class="phase">PHASE 5 · EVALUATION</div>
+      <h2>模型評估</h2>
+      <figure class="figure"><div class="plot tall" id="c-pred"></div><figcaption>測試集預測圖：隨機 300 筆，依預測值排序。深色帶＝平均反應的 95% 信賴區間 (CI)，淺色帶＝單筆觀測的 95% 預測區間 (PI)。</figcaption></figure>
+      <div class="two">
+        <figure class="figure"><div class="plot" id="c-scatter"></div><figcaption>實際值 vs 預測值（2,500 筆測試資料），對角線為完美預測。</figcaption></figure>
+        <figure class="figure"><div class="plot" id="c-partial"></div><figcaption id="partial-cap"></figcaption></figure>
+      </div>
+      <h3>係數估計（原始尺度，95% CI）</h3>
+      <figure class="figure"><div class="plot tall" id="c-coef"></div><figcaption>標準化係數 ± 95% CI。所有區間都遠離 0，代表 20 個因子對洪水機率都有顯著正向影響，且影響幅度相近。</figcaption></figure>
+      <div class="tablebox"><table id="t-coef"></table></div>
+      <h3>回歸假設檢查</h3>
+      <div class="two">
+        <figure class="figure"><div class="plot" id="c-resid"></div><figcaption>殘差 vs 擬合值：平均約為 0，但呈現離散的條紋狀結構，兩端的變異較大。</figcaption></figure>
+        <figure class="figure"><div class="plot" id="c-qq"></div><figcaption>Normal Q-Q：中段貼近直線，尾端偏離（右偏）。</figcaption></figure>
+      </div>
+      <div class="tablebox"><table id="t-assume"></table></div>
+      <p class="note">結論：模型在測試集上的表現與訓練集幾乎一致，沒有過擬合。殘差的常態性與同質變異性假設並未完全成立；但樣本數高達 40,000，依中央極限定理，係數的推論仍然穩健。PI 實測覆蓋率接近名目的 95%，代表預測區間在實務上可信。</p>
+    </section>
+
+    <!-- 6 -->
+    <section id="deploy">
+      <div class="phase">PHASE 6 · DEPLOYMENT</div>
+      <h2>互動預測器</h2>
+      <p>拖動滑桿，調整各風險因子的評分。頁面直接用訓練好的係數 β 與 (X'X)<sup>-1</sup> 即時計算預測值、95% CI 與 95% PI，與 <code>analysis.py</code> 的公式相同。</p>
+      <div class="predictor">
+        <div class="sliders" id="sliders"></div>
+        <div class="readout">
+          <div class="eyebrow">預測洪水機率</div>
+          <div class="big" id="p-out">—</div>
+          <div>
+            <div class="bar" id="p-bar"><div class="pi"></div><div class="ci"></div><div class="pt"></div></div>
+            <div class="scale"><span>0.20</span><span>0.40</span><span>0.60</span><span>0.80</span></div>
+          </div>
+          <dl class="iv">
+            <dt>95% CI</dt><dd id="p-ci">—</dd>
+            <dt>95% PI</dt><dd id="p-pi">—</dd>
+            <dt>總分</dt><dd id="p-sum">—</dd>
+          </dl>
+          <div class="presets">
+            <button type="button" id="b-mean">全部取平均</button>
+            <button type="button" id="b-low">低風險情境</button>
+            <button type="button" id="b-high">高風險情境</button>
+          </div>
+        </div>
+      </div>
+      <p>部署方式：本頁為靜態網站（GitHub Pages，<code>/docs</code> 資料夾）；模型參數存於 <code>outputs/model.json</code>，任何語言都能載入後以 ŷ = x₀ᵀβ 預測，區間公式為 ŷ ± t<sub>0.975,df</sub> · √(s²(1 + x₀ᵀ(XᵀX)<sup>-1</sup>x₀))。</p>
+    </section>
+
+    <!-- GPT -->
+    <section id="gpt">
+      <div class="ai gpt">
+        <span class="tag">GPT 輔助內容</span>
+        <h3>資料集挑選與分析流程規劃</h3>
+        <p>以下內容由 ChatGPT 對話產生，完整對話已匯出為 PDF（見 GitHub repo 的 <code>ai_logs/</code>）：</p>
+        <ul class="clean">
+          <li>詢問「列出 Kaggle 上特徵數介於 13–40 的多元線性回歸題目」，GPT 推薦了 Predict the Flood（20 特徵）、Istanbul Apartment Prices、Swiss Housing、Human–AI Interaction，以及可透過特徵選擇縮減的 House Prices。</li>
+          <li>GPT 建議首選 Flood 資料集，理由是 20 個數值特徵直接符合條件，不需要額外處理類別編碼。</li>
+          <li>GPT 建議的流程：CRISP-DM 六階段；比較 SelectKBest、RFE、Sequential Feature Selection、Lasso；評估 MAE、MSE、RMSE、R²、Adjusted R²，並檢查回歸假設。</li>
+        </ul>
+        <p>程式實作與網頁亦由 AI 程式助理（Claude Code）協助產生，所有數據皆由 <code>analysis.py</code> 實際執行後得出。</p>
+      </div>
+    </section>
+
+    <!-- NotebookLM -->
+    <section id="nlm">
+      <div class="ai nlm">
+        <span class="tag">NotebookLM 摘要</span>
+        <h3>網路上同主題解法研究</h3>
+        <p id="nlm-text">【請貼上 NotebookLM 產生的摘要】建議匯入的來源：Kaggle Playground S4E5 的 Discussion 與高票 Notebook、原始 Flood Prediction Dataset 的 Code 頁面。報告初稿（請以 NotebookLM 實際輸出核對後取代）：在 Kaggle「Regression with a Flood Prediction Dataset」(Playground S4E5) 中，評分指標為 R²。多數公開解法發現，20 個風險因子與目標之間幾乎是等權重的線性關係，因此單純的線性回歸就能達到約 0.84–0.85 的 R²。進一步的改進多來自特徵工程：加入 20 個特徵的總和、平均、標準差、最大最小值、排序後分位數等列統計量，再搭配 LightGBM、XGBoost、CatBoost 等梯度提升樹或神經網路進行集成，可將 R² 提升到約 0.869。也有作者指出原始 flood.csv 幾乎沒有雜訊，而競賽資料是由生成模型合成，因此帶有額外雜訊。本作業的結果與這些觀察一致：只用 FeatureSum 的簡單線性回歸，R² 就與 20 特徵的多元回歸相同。</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer><div class="wrap">資料來源：Kaggle · naiyakhalid/flood-prediction-dataset（train.csv，隨機抽樣 50,000 筆，seed 2024）。所有數值皆由 <code>analysis.py</code>（numpy / scipy）計算後寫入 <code>docs/data.js</code>。</div></footer>
+
+<script src="vendor/plotly.min.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  const R = window.RESULTS, M = window.MODEL;
+  if (!R || !M) { document.querySelector("main").insertAdjacentHTML("afterbegin", "<p class='note'>找不到 data.js，請先執行 python analysis.py。</p>"); return; }
+  const $ = s => document.querySelector(s);
+  const f = (v, d = 4) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+  const pfmt = p => p < 1e-300 ? "&lt;1e-300" : p < 1e-4 ? p.toExponential(1) : p.toFixed(4);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const fin = R.final, D = R.dataset, dg = R.diagnostics, FS = R.feature_selection;
+
+  // ---------- KPIs
+  $("#kpis").innerHTML = [
+    [f(fin.test.R2, 3), "測試集 R²"], [f(fin.test.RMSE, 4), "測試集 RMSE"],
+    [f(fin.test.MAE, 4), "測試集 MAE"], [(fin.pi_coverage * 100).toFixed(1) + "%", "95% PI 實測覆蓋率"],
+    [D.n_features, "原始特徵數"], [D.rows.toLocaleString(), "樣本數"]
+  ].map(([b, s]) => `<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join("");
+
+  // ---------- tables
+  $("#t-dataset").innerHTML = `<tr><th>項目</th><th>值</th></tr>` + [
+    ["資料來源", `<a href="${D.url}" target="_blank" rel="noopener">${D.name}</a>`],
+    ["使用檔案", D.source_file], ["樣本數 / 特徵數", `${D.rows.toLocaleString()} / ${D.n_features}`],
+    ["目標變數", D.target], ["缺失值 / 重複列", `${D.missing} / ${D.duplicates}`],
+    ["訓練 / 測試", `${D.train.toLocaleString()} / ${D.test.toLocaleString()}`],
+    ["特徵間最大 |r|", f(R.max_abs_feature_corr, 3)],
+    ["目標平均 ± 標準差", `${f(R.describe[D.target].mean, 4)} ± ${f(R.describe[D.target].std, 4)}`]
+  ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join("");
+  $("#orig-note").innerHTML = `資料檢查發現：原始 <code>flood.csv</code> 以 OLS 擬合的 R² = ${f(D.orig_flood_csv_r2, 6)}，目標幾乎是特徵的確定性線性函數，沒有雜訊，信賴區間和預測區間會縮成零寬度，失去分析意義。因此改用同一資料集中的 <code>train.csv</code>（Playground S4E5 合成版，含雜訊），並隨機抽樣 50,000 筆。`;
+
+  const fp = FS.forward_path;
+  const fsRows = [
+    ["Filter（F-test）前 5 名", Object.keys(FS.filter_F).slice(0, 5).join(", ")],
+    ["Forward（CV RMSE）加入順序前 5", fp.slice(0, 5).map(s => s.added).join(", ")],
+    ["Lasso 最早進入的 5 個", FS.lasso_rank.slice(0, 5).join(", ")],
+    ["Backward（p &lt; 0.05）保留數", `${FS.backward_kept.length} / ${D.n_features}`],
+    ["CV 最佳 k / 精簡 k（最佳 +0.5% 內）", `${FS.best_k} / ${FS.k_parsimonious}`]
+  ];
+  $("#t-fs").innerHTML = `<tr><th>方法</th><th style="text-align:left">結果</th></tr>` + fsRows.map(([a, b]) => `<tr><td>${a}</td><td style="text-align:left;white-space:normal;font-family:var(--f-body)">${b}</td></tr>`).join("");
+  $("#fs-note").innerHTML = `四種方法結論一致：<b>20 個特徵全部保留</b>。每個特徵單獨解釋的變異只有約 3–4%，但彼此幾乎獨立且等權重；少用任何一個，CV RMSE 都會明顯上升（k=19 時為 ${f(fp[18].cv_rmse, 5)}，k=20 時為 ${f(fp[19].cv_rmse, 5)}）。因此最終模型採用全部 ${fin.k} 個特徵。`;
+
+  $("#t-models").innerHTML = `<tr><th>模型</th><th>k</th><th>CV RMSE</th><th>Train R²</th><th>Test MAE</th><th>Test RMSE</th><th>Test R²</th><th>Test Adj R²</th><th>AIC</th></tr>` +
+    R.comparison.map(c => `<tr class="${c.k === fin.k && c.name.startsWith("Top") ? "pick" : ""}"><td>${c.name}</td><td>${c.k}</td><td>${f(c.cv_rmse, 5)}</td><td>${f(c.train.R2)}</td><td>${f(c.test.MAE, 5)}</td><td>${f(c.test.RMSE, 5)}</td><td>${f(c.test.R2)}</td><td>${f(c.test.AdjR2)}</td><td>${c.aic.toFixed(0)}</td></tr>`).join("");
+
+  $("#t-coef").innerHTML = `<tr><th>變數</th><th>係數 β</th><th>SE</th><th>t</th><th>p-value</th><th>95% CI 下限</th><th>95% CI 上限</th><th>標準化 β</th><th>VIF</th></tr>` +
+    fin.coef_table.map(c => `<tr><td>${c.term}</td><td>${f(c.coef, 5)}</td><td>${c.se.toExponential(2)}</td><td>${c.t.toFixed(1)}</td><td>${pfmt(c.p)}</td><td>${f(c.ci_low, 5)}</td><td>${f(c.ci_high, 5)}</td><td>${f(c.std_coef, 5)}</td><td>${f(c.vif, 3)}</td></tr>`).join("");
+
+  const pill = (ok, t) => `<span class="pill ${ok ? "ok" : "warn"}">${t}</span>`;
+  $("#t-assume").innerHTML = `<tr><th>假設</th><th>檢定 / 指標</th><th>結果</th><th>判定</th></tr>` + [
+    ["線性 (Linearity)", "殘差 vs 擬合值", "殘差平均≈0，無明顯曲線", pill(true, "大致成立")],
+    ["獨立性 (Independence)", "Durbin–Watson", f(dg.durbin_watson, 3), pill(Math.abs(dg.durbin_watson - 2) < .2, "成立")],
+    ["同質變異 (Homoscedasticity)", "Breusch–Pagan LM", `LM=${dg.bp_lm.toFixed(0)}, p=${pfmt(dg.bp_p)}`, pill(dg.bp_p > .05, dg.bp_p > .05 ? "成立" : "輕微違反")],
+    ["常態性 (Normality)", "Jarque–Bera", `JB=${dg.jb_stat.toFixed(0)}, skew=${f(dg.skew, 2)}, kurt=${f(dg.kurtosis, 2)}`, pill(dg.jb_p > .05, dg.jb_p > .05 ? "成立" : "輕微違反")],
+    ["無多重共線性", "最大 VIF", f(dg.max_vif, 3), pill(dg.max_vif < 5, "成立")]
+  ].map(r => `<tr>${r.map(x => `<td>${x}</td>`).join("")}</tr>`).join("");
+
+  // ---------- charts
+  const P = R.plots;
+  const charts = [];
+  function base(extra) {
+    const ink = css("--ink"), muted = css("--muted"), rule = css("--rule");
+    const ax = { gridcolor: rule, zerolinecolor: rule, linecolor: rule, tickfont: { color: muted, size: 11 }, title: { font: { color: muted, size: 12 } } };
+    const L = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+      font: { family: css("--f-body"), color: ink, size: 12 },
+      margin: { l: 56, r: 16, t: 10, b: 46 }, xaxis: { ...ax }, yaxis: { ...ax },
+      legend: { orientation: "h", y: 1.08, x: 0, font: { color: muted, size: 11 } },
+      hoverlabel: { font: { family: css("--f-data") } }
+    };
+    for (const k in extra) L[k] = (typeof extra[k] === "object" && !Array.isArray(extra[k]) && L[k]) ? { ...L[k], ...extra[k], title: { ...(L[k].title || {}), ...(extra[k].title || {}) } } : extra[k];
+    return L;
+  }
+  const cfg = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
+  function draw(id, traces, layout) { charts.push(() => Plotly.react(id, traces(), base(layout), cfg)); }
+
+  const W = () => css("--water"), S = () => css("--silt"), WS = () => css("--water-soft"), WM = () => css("--water-mid"), MU = () => css("--muted");
+  const feats = Object.keys(R.corr_target);
+
+  draw("c-hist", () => {
+    const e = R.target_hist.edges; const mids = R.target_hist.counts.map((_, i) => (e[i] + e[i + 1]) / 2);
+    return [{ type: "bar", x: mids, y: R.target_hist.counts, marker: { color: W() }, hovertemplate: "%{x:.3f}: %{y}<extra></extra>" }];
+  }, { xaxis: { title: { text: "FloodProbability" } }, yaxis: { title: { text: "筆數" } }, bargap: .05 });
+
+  draw("c-corr", () => {
+    const o = feats.slice().sort((a, b) => R.corr_target[a] - R.corr_target[b]);
+    return [{ type: "bar", orientation: "h", y: o, x: o.map(k => R.corr_target[k]), marker: { color: W() }, hovertemplate: "%{y}: r=%{x:.4f}<extra></extra>" }];
+  }, { margin: { l: 210 }, xaxis: { title: { text: "Pearson r" } } });
+
+  draw("c-heat", () => [{
+    type: "heatmap", z: R.corr_matrix.values, x: R.corr_matrix.labels, y: R.corr_matrix.labels, zmin: -1, zmax: 1,
+    colorscale: [[0, css("--silt")], [.5, css("--sheet")], [1, css("--water")]],
+    colorbar: { tickfont: { color: MU() }, thickness: 10 }, hovertemplate: "%{x} × %{y}<br>r=%{z:.3f}<extra></extra>"
+  }], { margin: { l: 200, b: 180, t: 10 }, xaxis: { tickangle: -60 }, yaxis: { autorange: "reversed" } });
+
+  draw("c-forward", () => [
+    { x: fp.map(s => s.k), y: fp.map(s => s.cv_rmse), name: "5-fold CV RMSE", mode: "lines+markers", line: { color: W() }, marker: { size: 6 }, text: fp.map(s => "+" + s.added), hovertemplate: "k=%{x} %{text}<br>RMSE=%{y:.5f}<extra></extra>" },
+    { x: fp.map(s => s.k), y: fp.map(s => s.adj_r2), name: "Adjusted R²", yaxis: "y2", mode: "lines", line: { color: S(), dash: "dot" }, hovertemplate: "k=%{x}<br>Adj R²=%{y:.4f}<extra></extra>" }
+  ], { xaxis: { title: { text: "特徵數 k" }, dtick: 2 }, yaxis: { title: { text: "CV RMSE" } }, yaxis2: { overlaying: "y", side: "right", range: [0, 1], tickfont: { color: MU() }, showgrid: false }, margin: { r: 46 } });
+
+  draw("c-lasso", () => Object.entries(FS.lasso_path.coefs).map(([k, v]) => ({ x: FS.lasso_path.lambdas, y: v, name: k, mode: "lines", line: { width: 1.3, color: W() }, opacity: .7, showlegend: false, hovertemplate: k + "<br>λ=%{x:.2e}, β=%{y:.4f}<extra></extra>" })),
+    { xaxis: { type: "log", autorange: "reversed", title: { text: "λ（log，由大到小）" } }, yaxis: { title: { text: "標準化係數" } } });
+
+  draw("c-models", () => {
+    const c = R.comparison;
+    return [{ type: "bar", x: c.map(r => r.name), y: c.map(r => r.test.R2), marker: { color: c.map(r => r.name.includes("FeatureSum") ? S() : W()) }, text: c.map(r => r.test.R2.toFixed(3)), textposition: "outside", textfont: { color: MU(), family: css("--f-data") }, hovertemplate: "%{x}<br>R²=%{y:.4f}<extra></extra>" }];
+  }, { yaxis: { range: [0, 1], title: { text: "Test R²" } }, margin: { b: 70 } });
+
+  draw("c-pred", () => {
+    const q = P.pred_sorted, x = q.yhat.map((_, i) => i);
+    return [
+      { x, y: q.pi_hi, mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
+      { x, y: q.pi_lo, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: WS(), name: "95% 預測區間 (PI)", hoverinfo: "skip" },
+      { x, y: q.ci_hi, mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
+      { x, y: q.ci_lo, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: WM(), name: "95% 信賴區間 (CI)", hoverinfo: "skip" },
+      { x, y: q.yhat, mode: "lines", line: { color: W(), width: 2 }, name: "預測值", hovertemplate: "ŷ=%{y:.4f}<extra></extra>" },
+      { x, y: q.y, mode: "markers", marker: { color: S(), size: 5 }, name: "實際值", hovertemplate: "y=%{y:.3f}<extra></extra>" }
+    ];
+  }, { xaxis: { title: { text: "樣本（依預測值排序）" } }, yaxis: { title: { text: "FloodProbability" } }, hovermode: "x unified" });
+
+  draw("c-scatter", () => {
+    const s = P.scatter, lo = Math.min(...s.y, ...s.yhat), hi = Math.max(...s.y, ...s.yhat);
+    return [
+      { x: s.yhat, y: s.y, mode: "markers", type: "scattergl", marker: { color: W(), size: 4, opacity: .3 }, name: "測試資料", hovertemplate: "ŷ=%{x:.3f}<br>y=%{y:.3f}<extra></extra>" },
+      { x: [lo, hi], y: [lo, hi], mode: "lines", line: { color: S(), width: 1.5 }, name: "y = ŷ" }
+    ];
+  }, { xaxis: { title: { text: "預測值" } }, yaxis: { title: { text: "實際值" } } });
+
+  $("#partial-cap").textContent = `${P.partial.feature} 的邊際效果（其他特徵固定在平均）。深色帶為 95% CI，淺色帶為 95% PI；斜率即為該特徵的係數。`;
+  draw("c-partial", () => {
+    const q = P.partial;
+    return [
+      { x: q.x, y: q.pi_hi, mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
+      { x: q.x, y: q.pi_lo, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: WS(), name: "95% PI" },
+      { x: q.x, y: q.ci_hi, mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
+      { x: q.x, y: q.ci_lo, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: WM(), name: "95% CI" },
+      { x: q.x, y: q.yhat, mode: "lines", line: { color: W(), width: 2 }, name: "預測值", hovertemplate: "x=%{x:.1f}<br>ŷ=%{y:.4f}<extra></extra>" }
+    ];
+  }, { xaxis: { title: { text: P.partial.feature } }, yaxis: { title: { text: "FloodProbability" } } });
+
+  draw("c-coef", () => {
+    const rows = fin.coef_table.filter(c => c.std_coef !== null).sort((a, b) => a.std_coef - b.std_coef);
+    return [{
+      type: "scatter", mode: "markers", y: rows.map(r => r.term), x: rows.map(r => r.std_coef),
+      error_x: { type: "data", array: rows.map(r => r.std_coef / r.t * 1.96), color: MU(), thickness: 1.2, width: 3 },
+      marker: { color: W(), size: 8 }, hovertemplate: "%{y}<br>std β=%{x:.5f}<extra></extra>"
+    }];
+  }, { margin: { l: 210 }, xaxis: { title: { text: "標準化係數（每增加 1 個標準差，洪水機率的變化）" }, rangemode: "tozero" } });
+
+  draw("c-resid", () => [
+    { x: P.resid.fitted, y: P.resid.resid, mode: "markers", type: "scattergl", marker: { color: W(), size: 4, opacity: .3 }, showlegend: false, hovertemplate: "fitted=%{x:.3f}<br>e=%{y:.4f}<extra></extra>" },
+    { x: [Math.min(...P.resid.fitted), Math.max(...P.resid.fitted)], y: [0, 0], mode: "lines", line: { color: S() }, showlegend: false }
+  ], { xaxis: { title: { text: "擬合值" } }, yaxis: { title: { text: "殘差" } } });
+
+  draw("c-qq", () => {
+    const [sl, ic] = P.resid.qq_line, xs = P.resid.qq_x;
+    return [
+      { x: xs, y: P.resid.qq_y, mode: "markers", marker: { color: W(), size: 4 }, showlegend: false, hovertemplate: "%{x:.2f}, %{y:.4f}<extra></extra>" },
+      { x: [xs[0], xs[xs.length - 1]], y: [sl * xs[0] + ic, sl * xs[xs.length - 1] + ic], mode: "lines", line: { color: S() }, showlegend: false }
+    ];
+  }, { xaxis: { title: { text: "理論分位數" } }, yaxis: { title: { text: "殘差分位數" } } });
+
+  const renderAll = () => { if (window.Plotly) charts.forEach(c => c()); };
+  if (window.Plotly) renderAll();
+  else {
+    // local vendor copy missing -> fall back to CDN
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js";
+    s.onload = renderAll;
+    s.onerror = () => document.querySelectorAll(".plot").forEach(p => p.innerHTML = "<p class='note'>無法載入 Plotly，請確認 docs/vendor/plotly.min.js 存在。</p>");
+    document.head.appendChild(s);
+  }
+  try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll); } catch (e) {}
+  new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  // ---------- predictor
+  const box = $("#sliders");
+  M.features.forEach((name, i) => {
+    const [lo, hi, mean] = M.ranges[name];
+    box.insertAdjacentHTML("beforeend", `<div class="sl"><label for="s${i}" title="${name}">${name}</label><output id="o${i}"></output><input type="range" id="s${i}" min="${lo}" max="${hi}" step="1" value="${Math.round(mean)}"></div>`);
+  });
+  const inputs = M.features.map((_, i) => $("#s" + i));
+  const toPct = v => Math.max(0, Math.min(100, (v - .2) / .6 * 100));
+  function predict() {
+    const x = [1, ...inputs.map(el => +el.value)];
+    inputs.forEach((el, i) => $("#o" + i).textContent = el.value);
+    const yhat = x.reduce((s, v, i) => s + v * M.beta[i], 0);
+    let h = 0;
+    for (let i = 0; i < x.length; i++) for (let j = 0; j < x.length; j++) h += x[i] * M.XtX_inv[i][j] * x[j];
+    const ci = M.tcrit * Math.sqrt(M.sigma2 * h), pi = M.tcrit * Math.sqrt(M.sigma2 * (1 + h));
+    $("#p-out").textContent = yhat.toFixed(3);
+    $("#p-ci").textContent = `[${(yhat - ci).toFixed(4)}, ${(yhat + ci).toFixed(4)}]`;
+    $("#p-pi").textContent = `[${(yhat - pi).toFixed(4)}, ${(yhat + pi).toFixed(4)}]`;
+    $("#p-sum").textContent = x.slice(1).reduce((a, b) => a + b, 0);
+    const bar = $("#p-bar");
+    const place = (el, a, b) => { el.style.left = toPct(a) + "%"; el.style.width = Math.max(.4, toPct(b) - toPct(a)) + "%"; };
+    place(bar.querySelector(".pi"), yhat - pi, yhat + pi);
+    place(bar.querySelector(".ci"), yhat - ci, yhat + ci);
+    bar.querySelector(".pt").style.left = toPct(yhat) + "%";
+  }
+  inputs.forEach(el => el.addEventListener("input", predict));
+  const setAll = fn => { inputs.forEach((el, i) => el.value = fn(M.ranges[M.features[i]])); predict(); };
+  $("#b-mean").onclick = () => setAll(r => Math.round(r[2]));
+  $("#b-low").onclick = () => setAll(r => Math.max(r[0], Math.round(r[2]) - 3));
+  $("#b-high").onclick = () => setAll(r => Math.min(r[1], Math.round(r[2]) + 3));
+  predict();
+})();
+</script>
+</body>
+</html>
